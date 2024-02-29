@@ -473,9 +473,9 @@ datatable(temp_table, caption = "Illinois LMI Population by Utility") %>%
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
 
-temp_table %>%
-  filter(Utility=="Total") %>%
-  write_csv("final_data/il_lmi_total.csv")
+# temp_table %>%
+#   filter(Utility=="Total") %>%
+#   write_csv("final_data/il_lmi_total.csv")
 
 ```
 
