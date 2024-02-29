@@ -11,6 +11,190 @@ output:
 
 
 
+```{r setup, include=FALSE}
+
+source('helper_functions.R')
+load_packages()
+
+
+
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+
+hifld_df <- st_read("utility_zones/HIFLD/Electric_Retail_Service_Territories (1)/Electric_Retail_Service_Territories.shp") 
+
+state_list <- c("IL", "MA", "MN", "NJ", "NM", "NY",  "CA", "DE")
+
+
+temp_util <- hifld_df %>%
+  filter(ID %in% c(56697, 4110,12341)) %>%
+  mutate(new_name = case_when(
+    ID == 56697 ~ "Ameren",
+    ID == 4110 ~ "ComEd",
+    ID == 12341 ~ "MidAmerican"
+  ))
+
+get_tracts <- get_acs(
+  geography="tract", 
+  state="IL",
+  variables=c("total_pop" = "B01001_001"),
+  year=2019, 
+  geometry=TRUE) %>%
+  mutate(total_pop = estimate) %>%
+  select(geoid=GEOID, geometry, total_pop) 
+
+
+new_tracts <- get_acs(
+  geography="tract", 
+  state="IL",
+  variables=c("total_pop" = "B01001_001"),
+  year=2020, 
+  geometry=TRUE) %>%
+  mutate(total_pop = estimate) %>%
+  select(geoid=GEOID, geometry, total_pop) 
+
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+chas_df <- load_chas() %>%
+    mutate(State_Name = case_when(
+    state == 17 ~ "Illinois",
+    state == 25 ~ "Massachusetts",  
+    state == 27 ~ "Minnesota",  
+    state == 34 ~ "New Jersey",
+    state == 35 ~ "New Mexico",  
+    state == 36 ~ "New York",
+    state == 06 ~ "California",
+    TRUE ~ "Other"
+  ))
+
+il_counties <- get_acs(geography="county",
+                       variables = c("Total_Pop" = "B01001_001","snap_hh" = "B22001_002","snap_pop" = "B19058_002"), 
+              state = "IL", 
+              year = 2021,
+              geometry = TRUE) %>%
+  group_by(NAME, GEOID) %>%
+  summarise(total_pop = estimate[variable=="Total_Pop"],
+            snap_hh = estimate[variable=="snap_hh"],
+            snap_pop = estimate[variable=="snap_pop"])
+
+
+
+il_tracts <- get_acs(
+  geography="tract", 
+  state="IL",
+  variables=c("snap_hh" = "B22001_002",
+              "snap_pop" = "B19058_002",
+              "medicaid_1" = "C27007_004",
+              "medicaid_2" = "C27007_007",
+              "medicaid_3" = "C27007_010",
+              "medicaid_4" = "C27007_014",
+              "medicaid_5" = "C27007_017",
+              "medicaid_6" = "C27007_020",
+              "Total_Pop" = "B01001_001"
+              
+              ),
+  year=2021, 
+  geometry=TRUE) %>%
+  group_by(GEOID) %>%
+  summarise(snap_hh = estimate[variable=="snap_hh"],
+            snap_pop = estimate[variable=="snap_pop"],
+            medicaid_pop =estimate[variable=="medicaid_1"] + 
+                          estimate[variable=="medicaid_2"] +
+                          estimate[variable=="medicaid_3"] +
+                          estimate[variable=="medicaid_4"] +
+                          estimate[variable=="medicaid_5"] +
+                          estimate[variable=="medicaid_6"] ,
+            total_pop = estimate[variable=="Total_Pop"])
+
+add_geo <- merge(chas_df, get_tracts) 
+
+add_geo <- st_as_sf(add_geo)
+
+il_geo <- add_geo %>%
+  filter(State_Name=="Illinois")
+
+temp_util <- st_transform(temp_util, st_crs(il_geo)) %>%
+  st_make_valid()
+```
+
+
+
+
+
+
+
+# Geoqualification
+
+The Microsoft Engie project uses a geoqualification map that was designed by Solstice. More details on the data used to create this map can be found Geospatial Methodology tab. 
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+engie_tracts <- st_read("/Users/jacobford/Library/CloudStorage/GoogleDrive-jake@solstice.us/Shared drives/Product | Jake/Geocoding/Engie:Microsoft Geodata/MFST Engie Qualified Tracts.shp") 
+
+# Population Var: TotalPp
+
+engie_tracts <- st_transform(engie_tracts, st_crs(get_tracts))
+
+old_sfa <- st_read("/Users/jacobford/Library/CloudStorage/GoogleDrive-jake@solstice.us/Shared drives/Product | Jake/Geocoding/ILSFA/Qualified Tracts/ILSFA Qualified Tracts.shp")
+
+old_sfa <- st_transform(old_sfa, st_crs(get_tracts))
+
+
+new_sfa <- st_read("/Users/jacobford/Library/CloudStorage/GoogleDrive-jake@solstice.us/Shared drives/Product | Jake/Geocoding/ILSFA/Updated Map June 2023/Tract_ILSFA_IncomeEligible_POLY_Map-Data/Tract_ILSFA_IncomeEligible_POLY.shp") %>%
+  filter(IncomeElig==1)
+
+new_sfa <- st_transform(new_sfa, st_crs(get_tracts))
+
+
+combined_sfa <- st_read("/Users/jacobford/Library/CloudStorage/GoogleDrive-jake@solstice.us/Shared drives/Product | Jake/Geocoding/ILSFA/Updated Map June 2023/combined_ilsfa_maps.geojson")
+
+combined_sfa <- st_transform(combined_sfa, st_crs(get_tracts))
+
+
+get_tracts <- get_tracts %>%
+  mutate(
+    engie = (geoid %in% engie_tracts$GEOID),
+    old_sfa = (geoid %in% old_sfa$GEOID)
+  )
+
+new_tracts <- new_tracts %>%
+  mutate(
+
+    new_sfa = (geoid %in% new_sfa$GEOID)
+    
+  )
+
+```
+
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data=engie_tracts,
+              group="Engie",
+             # stroke=TRUE,
+              color="lightgreen",
+              dashArray="3",
+              fillOpacity=0.55,
+              popup=paste("GEOID: ", engie_tracts$GEOID))
+
+```
+
+
 
 
 

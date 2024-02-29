@@ -3,8 +3,6 @@ output_dir: "docs"
 navbar:
   title: "Microsoft Engie Project Map"
   right:
-    - text: "Engie Map"
-      href: Illinois.html
     - text: "Geospatial Methodology"
       href: geospatial.html
 
