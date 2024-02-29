@@ -1,0 +1,680 @@
+---
+title: "Geospatial Methodology"
+output: 
+  rmdformats::downcute:
+    toc_depth: 3
+---
+
+
+```{r setup, include=FALSE}
+
+source('helper_functions.R')
+load_packages()
+
+chas_df <- load_chas() %>%
+    mutate(State_Name = case_when(
+    state == 17 ~ "Illinois",
+    state == 25 ~ "Massachusetts",  
+    state == 27 ~ "Minnesota",  
+    state == 34 ~ "New Jersey",
+    state == 35 ~ "New Mexico",  
+    state == 36 ~ "New York",
+    state == 06 ~ "California",
+    TRUE ~ "Other"
+  ))
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+#  html_document:
+#    toc: true
+#    toc_depth: 3
+#    toc_float: true
+
+#Load packages we'll need throughout the entire document
+library(readxl)
+library(sf)
+library(dplyr)
+library(janitor)
+library(dplyr)
+library(tidycensus)
+library(tidyverse)
+options(tigris_use_cache = TRUE)
+library(nngeo)
+library(leaflet)
+library(plotly)
+library(kableExtra)
+library(haven)
+library(rms)
+library(rmdformats)
+library(ggplot2)
+library(plotly)
+library(DT)
+library(ggmap)
+
+
+
+options(scipen = 100)
+
+
+```
+
+
+# Introduction
+
+This appendix outlines the technical methodology employed to generate geospatial tags and data to facilitate the Solstice LMI Subscriber Qualifications & Impact Reporting Clarifications for ENGIE in Illinois.
+
+To ensure accuracy and precision, three distinct sources were utilized for geoqualification. These sources offer an extensive range of reliable information, derived from multiple high-quality government databases. Each data source is described below. 
+
+Each methodology uses census tracts as the geographic unit. These are the census tracts updated in the 2010 Census. The updated 2020 census tracts were not used as the below sources often calculate attributes using lagged data. 
+
+
+
+## Housing and Urban Development (HUD)
+
+### Overview
+
+The Housing and Urban Development (HUD) Office of Policy Development and Research (PD&R) Comprehensive Housing Affordability Strategy [CHAS](https://www.huduser.gov/portal/datasets/cp.html#2006-2019_data) provides a wide range of data related to housing affordability and related factors in different geographic areas.
+
+The data available from CHAS includes information on household income, housing costs, and various housing characteristics such as tenure, type, age, and condition. Additionally, the CHAS data can be broken down by specific geographic areas such as states, counties, cities, and even census tracts. The CHAS data can be used to gain insights into the affordability of housing in different areas, and to understand the characteristics of households that are experiencing housing affordability challenges. This information can be used by policymakers, researchers, and other stakeholders to design and implement effective housing policy interventions. 
+
+The particular data used in this analysis comes from Table 11, showing the number of households by various AMI levels. This particular table was chosen due to it's granular AMI categories to allow for comparison of different AMI thresholds. The latest data available is 2019, and is calculated by PD&R using the 2015-2019 ACS 5-year average data. 
+
+### Methodology
+
+Using all census tracts in Illinois, we calculate the tract level number of households living at 100% or below AMI. We define a tagged census tract as any tract with 50% or above households living at 100% AMI or below. 
+
+
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+chas_df <- chas_df %>%
+  filter(State_Name == "Illinois")
+
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+il_income_df <- data.frame(AMI = c('100%','115%','120%','140%'),
+                           Threshold_50 = NA,
+                           Threshold_60 = NA,
+                           Threshold_70 = NA)
+
+
+il_income_df$Threshold_50[1] <- sum(chas_df$AMI_100_Pct>=0.5, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_50[2] <- sum(chas_df$AMI_115_Pct>=0.5, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_50[3] <- sum(chas_df$AMI_120_Pct>=0.5, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_50[4] <- sum(chas_df$AMI_140_Pct>=0.5, na.rm=T)/nrow(chas_df)
+
+il_income_df$Threshold_60[1] <- sum(chas_df$AMI_100_Pct>=0.6, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_60[2] <- sum(chas_df$AMI_115_Pct>=0.6, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_60[3] <- sum(chas_df$AMI_120_Pct>=0.6, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_60[4] <- sum(chas_df$AMI_140_Pct>=0.6, na.rm=T)/nrow(chas_df)
+
+il_income_df$Threshold_70[1] <- sum(chas_df$AMI_100_Pct>=0.7, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_70[2] <- sum(chas_df$AMI_115_Pct>=0.7, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_70[3] <- sum(chas_df$AMI_120_Pct>=0.7, na.rm=T)/nrow(chas_df)
+il_income_df$Threshold_70[4] <- sum(chas_df$AMI_140_Pct>=0.7, na.rm=T)/nrow(chas_df)
+
+
+library(DT)
+
+datatable(il_income_df) %>%
+    formatPercentage(columns = c("Threshold_50", "Threshold_60", "Threshold_70"))
+
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+g <- ggplot(data = il_income_df, aes(x = AMI)) +
+  geom_col(aes(y = Threshold_50, fill = "50% AMI")) +
+  geom_col(aes(y = Threshold_60, fill = "60% AMI")) +
+  geom_col(aes(y = Threshold_70, fill = "70% AMI")) +
+  scale_fill_manual(values = c("50% AMI" = "#1f78b4", "60% AMI" = "#33a02c", "70% AMI" = "#e31a1c"), 
+                    name = "AMI Thresholds") +
+  labs(x = "AMI", y = "Percentage", 
+       title = "Percentage of Households Above AMI Thresholds") +
+  theme_minimal()
+
+ggplotly(g)
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+get_tracts <- get_acs(
+  geography="tract", 
+  state=c("IL"),
+  variables=c("TotalPop" = "B01001_001"),
+  year=2019, 
+  geometry=TRUE) %>%
+  mutate(TotalPop = estimate)
+
+merged_df <- left_join(get_tracts, chas_df, by = c("GEOID" = "geoid"))
+```
+
+
+
+
+
+```{r eval=FALSE, fig.height=10, fig.width=10, message=FALSE, include=FALSE}
+### Total Distribution Map
+
+library(leaflet)
+
+# create color palette
+pal <- colorNumeric(palette = c("white", "blue",  "orange", "pink", "darkred"), domain = c(0, 1))
+
+# create leaflet map
+map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              weight = 1,
+              color = ~pal(AMI_100_Pct),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$geoid, "<br>",
+                            "Percent <= 100% AMI: ", merged_df$AMI_100_Pct)) %>%
+          addLegend("bottomleft",
+           group="AMI Buckets",
+            pal=pal,
+            value=merged_df$AMI_100_Pct,
+            title="Percent of HHs below 100% AMI") 
+  
+
+# display the map
+map
+
+```
+
+
+### HUD Map
+
+
+
+The below map shows the 3123 census tracts in Illinois. Using this methodology, 2029 census tracts are selected. 
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+library(leaflet)
+
+merged_df <- merged_df %>%
+  mutate(n_100_f = case_when(
+    n_100 == 1 ~ "Yes",
+    TRUE ~ "No"
+  ))
+
+
+# create color palette
+pal <- colorFactor(palette = c("grey", "darkred"), domain = c("No", "Yes"))
+pal1 <- colorFactor(palette = c(NA, "darkgreen"), domain = c(0, 1))
+pal2 <- colorFactor(palette = c(NA, "purple"), domain = c(0, 1))
+
+pal3 <- colorFactor(palette = c(NA, "lightblue"), domain = c(0, 1))
+
+
+# create leaflet map
+map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="100%",
+              weight = 1,
+              color = ~pal(n_100_f),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$geoid, "<br>",
+                            "Percent <= 100% AMI: ", merged_df$AMI_100_Pct)) %>%
+          addLegend("bottomleft",
+           group="100%",
+            pal=pal,
+            value=merged_df$n_100_f,
+            title="HUD Qualified Census Tracts") #%>%
+  
+    # addPolygons(data = merged_df, 
+    #           group="115%",
+    #           weight = 1,
+    #           color = ~pal1(n_115),
+    #           fillOpacity = 0.5,
+    #           popup = paste("GEOID: ", merged_df$geoid, "<br>",
+    #                         "Percent <= 115% AMI: ", merged_df$AMI_115_Pct)) %>%
+    #       addLegend("bottomleft",
+    #        group="115%",
+    #         pal=pal1,
+    #         value=merged_df$n_115,
+    #         title="115%") %>%
+    # 
+    # addPolygons(data = merged_df, 
+    #           group="120%",
+    #           weight = 1,
+    #           color = ~pal2(n_120),
+    #           fillOpacity = 0.5,
+    #           popup = paste("GEOID: ", merged_df$geoid, "<br>",
+    #                         "Percent <= 120% AMI: ", merged_df$AMI_120_Pct)) %>%
+    #       addLegend("bottomleft",
+    #        group="120%",
+    #         pal=pal2,
+    #         value=merged_df$n_120,
+    #         title="120%") %>%
+    # 
+    # addPolygons(data = merged_df, 
+    #           group="140%",
+    #           weight = 1,
+    #           color = ~pal3(n_140),
+    #           fillOpacity = 0.5,
+    #           popup = paste("GEOID: ", merged_df$geoid, "<br>",
+    #                         "Percent <= 140% AMI: ", merged_df$AMI_140_Pct)) %>%
+    #       addLegend("bottomleft",
+    #        group="140%",
+    #         pal=pal3,
+    #         value=merged_df$n_140,
+    #         title="140%") %>%
+
+  # addLayersControl(overlayGroups = c("100%", "115%", "120%", "140%")) %>%
+  # hideGroup("140%") %>% hideGroup("120%") %>% hideGroup("115%")
+
+  
+
+# display the map
+map
+
+```
+
+
+## Climate and Economic Justice Screening Tool (CEJST)
+
+The White House's Climate and Economic Justice Screening Tool is designed to assess how federal investments and policies may impact vulnerable communities and populations that are disproportionately affected by climate change and economic inequality. The tool collects and analyzs data on a variety of factors, including demographic characteristics, public health, and environmental risks, to identify areas that are most in need of support and intervention.
+
+The screening process begins by mapping out areas with high concentrations of low-income and marginalized populations, as well as areas with significant environmental hazards such as air pollution, lead contamination, and flooding. This information is then overlaid with data on climate change impacts such as rising temperatures, sea level rise, and extreme weather events to identify areas that are particularly vulnerable to the effects of climate change. The tool also takes into account historical and ongoing environmental injustices, such as the disproportionate placement of hazardous waste sites in low-income and minority communities. By analyzing these various factors, the screening tool helps to prioritize federal investments and policies that can address the needs of these vulnerable communities and promote economic and environmental justice.
+
+The tool ranks most of the burdens using percentiles. The tool uses datasets as indicators of burdens. The burdens are organized into categories. A census tract is tagged as disadvantaged on the CEJST map if is both (1) at or above the threshold for one or more environmental, climate, or other burdens, and (2) at or above the threshold for an associated socioeconomic burden. Socioeconomic threshold is if People in households where income is less than or equal to twice the federal poverty level, not including students enrolled in higher ed. Typically this corresponds to the 65th percentile. In addition, a census tract that is completely surrounded by disadvantaged communities and is at or above the 50% percentile for low income is also considered disadvantaged. 
+
+
+
+### Environmental, Climate, or Other Burden Categories
+
+The below are the categories for the environmental, climate, or other burden areas captured in the CEJST. 
+
+
+**Climate change**
+
+ + expected agriculture loss rate 
+ + expected building loss rate 
+ + expected population loss rate 
+ + projected flood risk
+ + projected wildfire risk
+ 
+**Energy**
+
+ + energy cost
+ + PM2.5 in the air
+ 
+**Health**
+
+ + asthma
+ + diabetes
+ + heart disease
+ + low life expectancy
+ 
+**Housing**
+
+ + historic underinvestment
+ + housing cost
+ + lack of green space
+ + lack of indoor plumbing
+ + lead paint
+ 
+**Legacy Pollution**
+
+ + abandoned mine
+ + Formerly used defense sites
+ + Proximity to hazardous waste facilities
+ + Superfund sites
+ + Risk Management Plan
+
+**Transportation**
+
+ + disesel particulate matter
+ + transportation barriers
+ + traffic proximity and volume
+
+**Water and wastewater**
+
+ + underground storage tanks and releases
+ + wastewater discharge
+
+**Workforce development**
+
+ + linguistic isolation
+ + low median income
+ + poverty
+ + unemployment
+ + education
+
+
+Using this definition, 1061 census tracts are tagged. 
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ceq <- st_read("CEQ/usa/usa.shp")
+
+ceq <- ceq %>%
+  filter(SF =="Illinois") %>%
+  st_drop_geometry()
+
+
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+merged_df <- left_join(merged_df, ceq, by = c("GEOID" = "GEOID10"))
+```
+
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+# Note: SN_C captures "Definition N community, including adjacency index tracts" - see columns.csv within CEQ/usa  
+
+# 
+
+merged_df <- merged_df %>%
+  mutate(SN_C_f = case_when(
+    SN_C == 1 ~ "Yes",
+    TRUE ~ "No"
+  ))
+
+
+pal <- colorFactor(palette = c("grey", "darkred"), domain = c("No", "Yes"))
+
+
+
+
+# create leaflet map
+ceq_map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="CEQ Disadvantaged",
+              weight = 1,
+              color = ~pal(SN_C_f),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$GEOID, "<br>")) %>%
+          addLegend("bottomleft",
+           group="100%",
+            pal=pal,
+            value=merged_df$SN_C_f,
+            title="CEJST Qualified Census Tracts") 
+
+ceq_map
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## DOE LEAD
+
+The Department of Energy (DOE) Low-Income Energy Affordability Data [(LEAD)](https://www.energy.gov/scep/slsc/lead-tool) tool is designed to help policymakers, energy advocates, and researchers understand the energy burden faced by low-income households in the United States. The tool uses a variety of data sources to identify and tag census tracts with high concentrations of low-income households, as well as areas with high energy burdens, which are defined as the percentage of household income spent on energy bills.
+
+The tool also uses data from the US Energy Information Administration to identify areas with high energy burdens. Specifically, the tool calculates the energy burden for each census tract by dividing the median energy bill by the median household income, and then tags census tracts with an energy burden of 6% or higher as "high energy burden." By tagging census tracts with high concentrations of low-income households and high energy burdens, the DOE LEAD tool helps to identify areas where energy affordability is a significant issue, and where targeted energy assistance programs and policies may be needed to promote energy equity and affordability.
+
+The trigger for energy burdened tracts is taken from the [ACEEE](https://www.aceee.org/sites/default/files/pdfs/u2006.pdf) research, wherein any tract where the average energy burden is greater than 6% is considered burdened. For this analysis, 94 census tracts are tagged. 
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+lead <- read.csv("DOE LEAD/lead-tool-map-data (9).csv") %>%
+  mutate(eb_tag = case_when(
+    Avg..Energy.Burden....income. > 6 ~ 1,
+    TRUE ~ 0
+  ),
+  GEOID = as.character(GEOID)) 
+
+table(lead$eb_tag)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+merged_df <- left_join(merged_df, lead, by = c("GEOID") )
+```
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+# create color palette
+pal <- colorFactor(palette = c(NA, "darkred"), domain = c(0, 1))
+
+merged_df <- merged_df %>%
+  mutate(eb_tag_f = case_when(
+    eb_tag == 1 ~ "Yes",
+    TRUE ~ "No"
+  ))
+
+
+pal <- colorFactor(palette = c("grey", "darkred"), domain = c("No", "Yes"))
+
+# create leaflet map
+lead_map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="Energy Burdened",
+              weight = 1,
+              color = ~pal(eb_tag_f),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$GEOID, "<br>",
+                            "Average Energy Burden: ", merged_df$Avg..Energy.Burden....income.)) %>%
+          addLegend("bottomleft",
+         #  group="100%",
+            pal=pal,
+            value=merged_df$eb_tag_f,
+            title="DOE LEAD Qualified Census Tracts")
+
+lead_map 
+
+```
+
+
+
+
+
+
+
+
+## Combined
+
+### Any Tag
+
+The below map shows the census blocks that received any tag in the above three methods. A total of 2040 census tracts are tagged. 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+merged_df <- merged_df %>%
+  mutate(
+    any_tag = case_when(
+      eb_tag + SN_C + n_100 >0 ~ "Yes",
+      TRUE ~ "No"
+    ),
+    total_tags = eb_tag + SN_C + n_100
+  )
+
+merged_df <- merged_df %>%
+  mutate(
+    total_tags = case_when(
+      is.na(total_tags) ~ 0,
+      TRUE ~ total_tags
+    )
+  )
+
+table(merged_df$any_tag)
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+# create color palette
+pal <- colorFactor(palette = c("grey", "darkgreen", "yellow", "darkred"), 
+                   domain = c(0,1,2,3), na.color = "white")
+
+# create leaflet map
+map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="Energy Burdened",
+              weight = 1,
+              color = ~pal(total_tags),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$GEOID, "<br>",
+                            "Average Energy Burden: ", merged_df$any_tag)) %>%
+  addLegend("bottomleft",
+            pal=pal,
+            title="Solstice Combined Qualified Census Tracts",
+            values = merged_df$total_tags)
+
+map
+
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+# create color palette
+pal <- colorFactor(palette = c("grey", "darkred"), domain = c("No", "Yes"), na.color = "white")
+
+# create leaflet map
+map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="Energy Burdened",
+              weight = 1,
+              color = ~pal(any_tag),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$GEOID, "<br>",
+                            "Average Energy Burden: ", merged_df$any_tag)) %>%
+  addLegend("bottomleft",
+            pal=pal,
+            title="Solstice Combined Qualified Census Tracts",
+            values = merged_df$any_tag)
+
+map
+
+
+```
+
+### All Tags
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+merged_df <- merged_df %>%
+  mutate(
+    all_tags = case_when(
+      eb_tag + SN_C + n_100 >2 ~ 1,
+      TRUE ~ 0
+    )
+  )
+
+table(merged_df$all_tags)
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+# create color palette
+pal <- colorFactor(palette = c(NA, "darkred"), domain = c(0, 1))
+
+
+
+# create leaflet map
+map <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = merged_df, 
+              group="Energy Burdened",
+              weight = 1,
+              color = ~pal(all_tags),
+              fillOpacity = 0.5,
+              popup = paste("GEOID: ", merged_df$GEOID, "<br>",
+                            "Average Energy Burden: ", merged_df$all_tags)) %>%
+          addLegend("bottomleft",
+         #  group="100%",
+            pal=pal,
+            value=merged_df$all_tags,
+            title="Energy Burdened")
+
+map 
+
+```
+
+
+
+
+
+
+## Census Tract Comparison Table
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+compare_table <- data.frame(Method = c('HUD','CEJST','DOE LEAD', 'Total'))
+
+
+compare_table$`Qualified Tracts`[1] <- sum(merged_df$n_100, na.rm=T)
+compare_table$`Qualified Tracts`[2] <- sum(merged_df$SN_C, na.rm=T)
+compare_table$`Qualified Tracts`[3] <- sum(merged_df$eb_tag, na.rm=T)
+compare_table$`Qualified Tracts`[4] <- sum(merged_df$total_tags>0)
+
+compare_table$Population[1] <- sum(merged_df$TotalPop[merged_df$n_100==1], na.rm=T)
+compare_table$Population[2] <- sum(merged_df$TotalPop[merged_df$SN_C==1], na.rm=T)
+compare_table$Population[3] <- sum(merged_df$TotalPop[merged_df$eb_tag==1], na.rm=T)
+compare_table$Population[4] <- sum(merged_df$TotalPop[merged_df$total_tags>0], na.rm=T)
+
+library(DT)
+
+# format columns with commas
+compare_table$`Qualified Tracts` <- format(compare_table$`Qualified Tracts`, big.mark = ",")
+compare_table$Population <- format(compare_table$Population, big.mark = ",")
+
+
+datatable(compare_table, 
+          width = "75%", 
+          options = list(
+            pageLength = 10,
+            lengthChange = FALSE,
+            searching = FALSE
+          ))
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
